@@ -1,16 +1,3 @@
-# /// script
-# requires-python = ">=3.11"
-# dependencies = [
-#   "httpx",
-#   "pandas",
-#   "seaborn",
-#   "matplotlib",
-#   "scipy",
-#   "requests",
-#   "openai==0.27.6",
-# ]
-# ///
-
 import os
 import sys
 import logging
@@ -20,15 +7,14 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from scipy.stats import chi2_contingency
 import requests
-import openai
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 
-AIPROXY_TOKEN = ""
-UPLOAD_ENDPOINT = "https://aiproxy.sanand.workers.dev/"
+AIPROXY_TOKEN = os.getenv("AIPROXY_TOKEN", "")  # Get token from environment variable
+UPLOAD_ENDPOINT = "https://aiproxy.sanand.workers.dev/openai/v1/chat/completions"  # Set this to your intended endpoint
 
 def read_csv(filename):
     try:
@@ -42,11 +28,26 @@ def read_csv(filename):
         logging.error(f"Error loading {filename}: {e}")
         sys.exit(1)
 
-def analyze_data(df):
-    openai.api_key = AIPROXY_TOKEN
+import requests
+import logging
+import sys
 
+def analyze_data(df):
+    # Check if the API token is available
+    if not AIPROXY_TOKEN:
+        logging.error("API token is not set in environment variables.")
+        return "Error: API token is missing."
+
+    # Set up the headers for the API request
+    headers = {
+        "Authorization": f"Bearer {AIPROXY_TOKEN}",
+        "Content-Type": "application/json",
+    }
+
+    # Convert the first few rows of the dataframe to a string for the prompt
     df_string = df.head(10).to_string()
 
+    # Create the prompt for analysis
     prompt = f"""
     You are a data analysis assistant. Given the following dataset:
 
@@ -61,16 +62,41 @@ def analyze_data(df):
     Respond with the analysis and insights.
     """
 
-    response = openai.ChatCompletion.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "system", "content": "You are a helpful data analysis assistant."},
-                  {"role": "user", "content": prompt}],
-        max_tokens=1000,
-        temperature=0.7,
-    )
+    # Create the data for the API request
+    data = {
+        "model": "gpt-4o-mini",  # Use the model supported by the proxy
+        "messages": [
+            {"role": "system", "content": "You are a helpful data analysis assistant."},
+            {"role": "user", "content": prompt}
+        ],
+        "max_tokens": 1000,
+        "temperature": 0.7,
+    }
 
-    analysis = response['choices'][0]['message']['content'].strip()
-    return analysis
+    try:
+        # Send the request to the AI Proxy
+        response = requests.post(api_url, json=data, headers=headers)
+
+        # Check if the response is valid
+        if response.status_code == 200:
+            response_data = response.json()
+            if 'choices' in response_data:
+                # Extract the content of the analysis if 'choices' is present
+                analysis = response_data['choices'][0]['message']['content'].strip()
+                return analysis
+            else:
+                # Log and handle the case when 'choices' is not present
+                logging.error("No 'choices' found in the response: %s", response_data)
+                return "Error: No analysis available."
+        else:
+            # Handle failed API response
+            logging.error(f"Error with AIPROXY API: {response.status_code} - {response.text}")
+            return f"Request failed with status code {response.status_code}"
+    
+    except Exception as e:
+        # Handle general errors
+        logging.error(f"An error occurred: {str(e)}")
+        return f"An error occurred: {str(e)}"
 
 def visualize_data(df):
     charts = []
@@ -169,9 +195,9 @@ def main():
 
     analysis = analyze_data(df)
 
-    charts = visualize_data(df, ".")
+    charts = visualize_data(df)
 
-    save_markdown(df, analysis, charts, ".")
+    save_markdown(df, analysis, charts)
     logging.info("Analysis completed successfully.")
 
 if __name__ == "__main__":

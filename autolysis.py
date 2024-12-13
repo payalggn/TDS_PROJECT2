@@ -101,8 +101,8 @@ def analyze_data(df):
         logging.error(f"An error occurred while making the API request: {e}")
         return f"Error: {str(e)}"
 
-def visualize_data(df, output_folder):
-    """Generate visualizations for the dataset and save to the specified folder."""
+def visualize_data(df):
+    """Generate visualizations for the dataset and save to the current working directory."""
     charts = []
 
     # Identify numeric columns
@@ -121,7 +121,7 @@ def visualize_data(df, output_folder):
         )
         heatmap.set_title("Correlation Heatmap", fontsize=12, pad=20)  # Reduce font size for low detail
         plt.tight_layout(pad=3.0)
-        heatmap_file = os.path.join(output_folder, "heatmap.png")
+        heatmap_file = "heatmap.png"  # Save in the current directory
         plt.savefig(heatmap_file, dpi=100)  # Save as 960x540 pixels at 100 dpi
         charts.append(heatmap_file)
         plt.close()
@@ -136,7 +136,7 @@ def visualize_data(df, output_folder):
         plt.ylabel("Values", fontsize=10)  # Reduce font size for low detail
         plt.legend(loc="best", fontsize=8)  # Reduce legend font size for low detail
         plt.tight_layout(pad=3.0)
-        lineplot_file = os.path.join(output_folder, "lineplot.png")
+        lineplot_file = "lineplot.png"  # Save in the current directory
         plt.savefig(lineplot_file, dpi=100)  # Save as 960x540 pixels at 100 dpi
         charts.append(lineplot_file)
         plt.close()
@@ -151,7 +151,7 @@ def visualize_data(df, output_folder):
             plt.xlabel(second_column, fontsize=10)  # Reduce font size for low detail
             plt.ylabel("Frequency", fontsize=10)  # Reduce font size for low detail
             plt.tight_layout(pad=3.0)
-            histogram_file = os.path.join(output_folder, "histogram.png")
+            histogram_file = "histogram.png"  # Save in the current directory
             plt.savefig(histogram_file, dpi=100)  # Save as 960x540 pixels at 100 dpi
             charts.append(histogram_file)
             plt.close()
@@ -194,7 +194,7 @@ def save_markdown(df, analysis, charts):
     for chart in charts:
         readme_content += f"![Chart](./{chart})\n"
 
-    readme_file = "README.md"
+    readme_file = "README.md"  # Save in the current directory
     with open(readme_file, "w") as f:
         f.write(readme_content)
 

@@ -72,7 +72,7 @@ def analyze_data(df):
     analysis = response['choices'][0]['message']['content'].strip()
     return analysis
 
-def visualize_data(df, output_folder):
+def visualize_data(df):
     charts = []
 
     numeric_columns = df.select_dtypes(include=["number"]).columns
@@ -87,7 +87,7 @@ def visualize_data(df, output_folder):
         )
         heatmap.set_title("Correlation Heatmap", fontsize=16, pad=20)
         plt.tight_layout(pad=3.0)
-        heatmap_file = os.path.join(output_folder, "heatmap.png")
+        heatmap_file = "heatmap.png"  # Save in the current directory
         plt.savefig(heatmap_file, dpi=300)
         charts.append(heatmap_file)
         plt.close()
@@ -101,7 +101,7 @@ def visualize_data(df, output_folder):
         plt.ylabel("Values", fontsize=14)
         plt.legend(loc="best")
         plt.tight_layout(pad=3.0)
-        lineplot_file = os.path.join(output_folder, "lineplot.png")
+        lineplot_file = "lineplot.png"  # Save in the current directory
         plt.savefig(lineplot_file, dpi=300)
         charts.append(lineplot_file)
         plt.close()
@@ -114,14 +114,14 @@ def visualize_data(df, output_folder):
         plt.xlabel(second_column, fontsize=14)
         plt.ylabel("Frequency", fontsize=14)
         plt.tight_layout(pad=3.0)
-        histogram_file = os.path.join(output_folder, "histogram.png")
+        histogram_file = "histogram.png"  # Save in the current directory
         plt.savefig(histogram_file, dpi=300)
         charts.append(histogram_file)
         plt.close()
 
     return charts
 
-def save_markdown(df, analysis, charts, output_folder):
+def save_markdown(df, analysis, charts):
     df_info = {
         "shape": df.shape,
         "columns": list(df.columns),
@@ -130,20 +130,7 @@ def save_markdown(df, analysis, charts, output_folder):
 
     narration = f"""This dataset contains {df_info['shape'][0]} rows and {df_info['shape'][1]} columns, providing valuable insights into various attributes such as {', '.join(df_info['columns'][:5])}, and more. The dataset reveals interesting trends and patterns. For instance, the presence of missing values in some columns such as {', '.join([col for col, val in df_info['missing_values'].items() if val > 0])} highlights areas that may require further attention. Analyzing the relationships between these variables sheds light on significant correlations and distributions, offering a deeper understanding of the data."""
 
-    payload = {
-        "token": AIPROXY_TOKEN,
-        "action": "generate_readme",
-        "analysis": {
-            "df_info": df_info,
-            "insights": analysis,
-        },
-        "charts": charts
-    }
-
-    try:
-        response = requests.post(UPLOAD_ENDPOINT, json=payload)
-        response.raise_for_status()
-        readme_content = f"""# Analysis Report
+    readme_content = f"""# Analysis Report
 
 ## Narration
 
@@ -162,17 +149,14 @@ def save_markdown(df, analysis, charts, output_folder):
 ## Visualizations
 
 """
-        for chart in charts:
-            chart_name = Path(chart).name
-            readme_content += f'<img src="./{chart_name}" alt="Chart" width="540" />\n'
+    for chart in charts:
+        readme_content += f'<img src="./{chart}" alt="Chart" width="540" />\n'
 
-        readme_file = os.path.join(output_folder, "README.md")
-        with open(readme_file, "w") as f:
-            f.write(readme_content)
+    readme_file = "README.md"  # Save in the current directory
+    with open(readme_file, "w") as f:
+        f.write(readme_content)
 
-        logging.info("README.md generated successfully.")
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Failed to generate README.md: {e}")
+    logging.info("README.md generated successfully.")
 
 def main():
     if len(sys.argv) != 2:
@@ -180,9 +164,13 @@ def main():
         sys.exit(1)
 
     file_path = sys.argv[1]
+
     df = read_csv(file_path)
+
     analysis = analyze_data(df)
+
     charts = visualize_data(df, ".")
+
     save_markdown(df, analysis, charts, ".")
     logging.info("Analysis completed successfully.")
 

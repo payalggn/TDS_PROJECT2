@@ -180,14 +180,10 @@ def main():
         sys.exit(1)
 
     file_path = sys.argv[1]
-    output_folder = Path(file_path).stem
-
-    os.makedirs(output_folder, exist_ok=True)
-
     df = read_csv(file_path)
     analysis = analyze_data(df)
-    charts = visualize_data(df, output_folder)
-    save_markdown(df, analysis, charts, output_folder)
+    charts = visualize_data(df, ".")
+    save_markdown(df, analysis, charts, ".")
     logging.info("Analysis completed successfully.")
 
 if __name__ == "__main__":

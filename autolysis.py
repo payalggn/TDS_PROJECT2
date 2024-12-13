@@ -39,38 +39,43 @@ def read_csv(filename):
         logging.error(f"Error loading {filename}: {e}")
         sys.exit(1)
 
-def analyze_data(df):
-    """Analyze data using the AI Proxy."""
+def prepare_prompt(df):
+    """Prepare dynamic prompt based on the dataset."""
+    df_info = {
+        "shape": df.shape,
+        "columns": list(df.columns),
+        "numeric_columns": df.select_dtypes(include=["number"]).columns.tolist(),
+        "categorical_columns": df.select_dtypes(exclude=["number"]).columns.tolist(),
+    }
+
+    prompt = f"""
+    You are a data analysis assistant. Here is the dataset:
+    
+    - Shape: {df_info['shape']}
+    - Columns: {', '.join(df_info['columns'])}
+    - Numeric Columns: {', '.join(df_info['numeric_columns'])}
+    - Categorical Columns: {', '.join(df_info['categorical_columns'])}
+
+    Please analyze the dataset, identify trends, and offer insights on:
+    1. General observations about the data.
+    2. Statistical relationships between variables.
+    3. Missing or unusual values.
+    4. Any potential issues or suggestions for further analysis.
+    """
+    
+    return prompt
+
+def send_api_request(prompt):
+    """Send a request to the AI Proxy API."""
     if not AIPROXY_TOKEN:
         logging.error("API token is not set in environment variables.")
         return "Error: API token is missing."
 
-    # Define the AI Proxy endpoint
     api_url = "https://aiproxy.sanand.workers.dev/openai/v1/chat/completions"
-
-    # Set up the headers for the API request
     headers = {
         "Authorization": f"Bearer {AIPROXY_TOKEN}",
         "Content-Type": "application/json",
     }
-
-    # Convert the first few rows of the dataframe to a string for the prompt
-    df_string = df.head(10).to_string()
-
-    # Create the prompt for analysis
-    prompt = f"""
-    You are a data analysis assistant. Given the following dataset:
-
-    {df_string}
-
-    Please provide:
-    1. A summary of the dataset, including key trends and observations.
-    2. Identify any missing or unusual values.
-    3. Analyze relationships between any categorical variables.
-    4. Provide any recommendations or insights based on the data.
-
-    Respond with the analysis and insights.
-    """
 
     data = {
         "model": "gpt-4o-mini",
@@ -83,23 +88,95 @@ def analyze_data(df):
     }
 
     try:
-        # Send the request to the AI Proxy
         response = requests.post(api_url, json=data, headers=headers)
-
         if response.status_code == 200:
-            response_data = response.json()
-            if "choices" in response_data:
-                analysis = response_data["choices"][0]["message"]["content"].strip()
-                return analysis
-            else:
-                logging.error(f"Unexpected response format: {response_data}")
-                return "Error: No analysis available in the response."
+            return response.json()
         else:
             logging.error(f"API request failed: {response.status_code} - {response.text}")
-            return f"Error: API request failed with status {response.status_code}"
+            return None
     except Exception as e:
         logging.error(f"An error occurred while making the API request: {e}")
-        return f"Error: {str(e)}"
+        return None
+
+def process_api_response(response_data):
+    """Process the response from the API and return the analysis."""
+    if "choices" in response_data:
+        analysis = response_data["choices"][0]["message"]["content"].strip()
+        return analysis
+    else:
+        logging.error(f"Unexpected response format: {response_data}")
+        return "Error: No analysis available in the response."
+
+def analyze_data(df):
+    """Analyze data using the AI Proxy and apply statistical methods."""
+    if not AIPROXY_TOKEN:
+        logging.error("API token is not set in environment variables.")
+        return "Error: API token is missing."
+
+    # Basic Descriptive Statistics
+    description = df.describe(include='all')
+
+    # Correlation Analysis (for numeric columns)
+    numeric_columns = df.select_dtypes(include=["number"]).columns
+    correlation_matrix = df[numeric_columns].corr()
+
+    # Chi-Square Test for Categorical Variables
+    categorical_columns = df.select_dtypes(include=["object"]).columns
+    chi_square_results = {}
+    for col1 in categorical_columns:
+        for col2 in categorical_columns:
+            if col1 != col2:
+                # Creating a contingency table for chi-square test
+                contingency_table = pd.crosstab(df[col1], df[col2])
+                chi2, p, _, _ = chi2_contingency(contingency_table)
+                chi_square_results[(col1, col2)] = (chi2, p)
+
+    # Summarize the results
+    analysis_summary = f"""
+    ### Descriptive Statistics:
+    {description.to_string()}
+
+    ### Correlation Analysis:
+    {correlation_matrix.to_string()}
+
+    ### Chi-Square Test Results:
+    """
+    for (col1, col2), (chi2, p) in chi_square_results.items():
+        analysis_summary += f"\n{col1} vs {col2}: Chi2 = {chi2:.2f}, p-value = {p:.4f}"
+
+    # Send API request for advanced analysis
+    df_string = df.head(10).to_string()  # Use top 10 rows for AI model analysis
+    prompt = f"""
+    You are a data analysis assistant. Given the following dataset:
+
+    {df_string}
+
+    Please provide:
+    1. A summary of the dataset, including key trends and observations.
+    2. Identify any missing or unusual values.
+    3. Analyze relationships between any categorical variables.
+    4. Provide any recommendations or insights based on the data.
+    """
+    data = {
+        "model": "gpt-4o-mini",
+        "messages": [
+            {"role": "system", "content": "You are a helpful data analysis assistant."},
+            {"role": "user", "content": prompt},
+        ],
+        "max_tokens": 1000,
+        "temperature": 0.7,
+    }
+
+    try:
+        response = send_api_request(data)
+        if response:
+            analysis_summary += f"\n\nAPI Analysis:\n{response}"
+        else:
+            logging.warning("API response missing or failed.")
+    except Exception as e:
+        logging.error(f"Error with API request: {str(e)}")
+
+    return analysis_summary
 
 def visualize_data(df):
     """Generate visualizations for the dataset and save to the current working directory."""

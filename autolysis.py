@@ -101,26 +101,60 @@ def analyze_data(df):
         logging.error(f"An error occurred while making the API request: {e}")
         return f"Error: {str(e)}"
 
-def visualize_data(df):
-    """Generate visualizations for the dataset."""
+def visualize_data(df, output_folder):
+    """Generate visualizations for the dataset and save to the specified folder."""
     charts = []
+
+    # Identify numeric columns
     numeric_columns = df.select_dtypes(include=["number"]).columns
 
-    if len(numeric_columns) > 0:
-        plt.figure(figsize=(18, 10))
+    # Correlation Heatmap with low detail
+    if len(numeric_columns) > 1:  # Correlation requires at least two numeric columns
+        plt.figure(figsize=(9.6, 5.4))  # Set the figsize to 960x540 pixels (9.6 inches at 100 dpi)
         heatmap = sns.heatmap(
             df[numeric_columns].corr(),
             annot=True,
             cmap="coolwarm",
             fmt=".2f",
-            cbar_kws={"shrink": 0.8},
+            cbar_kws={'shrink': 0.8},
+            annot_kws={"size": 8},  # Reduce annotation size for low detail
         )
-        heatmap.set_title("Correlation Heatmap", fontsize=16, pad=20)
+        heatmap.set_title("Correlation Heatmap", fontsize=12, pad=20)  # Reduce font size for low detail
         plt.tight_layout(pad=3.0)
-        heatmap_file = "heatmap.png"
-        plt.savefig(heatmap_file, dpi=300)
+        heatmap_file = os.path.join(output_folder, "heatmap.png")
+        plt.savefig(heatmap_file, dpi=100)  # Save as 960x540 pixels at 100 dpi
         charts.append(heatmap_file)
         plt.close()
+
+    # Line Plot of Numeric Columns with low detail
+    if len(numeric_columns) >= 2:
+        plt.figure(figsize=(9.6, 5.4))  # Set the figsize to 960x540 pixels (9.6 inches at 100 dpi)
+        for col in numeric_columns:
+            df[col].dropna().reset_index(drop=True).plot(label=col, linewidth=1)  # Reduce line width for low detail
+        plt.title("Line Plot of Numeric Columns", fontsize=12, pad=20)  # Reduce font size for low detail
+        plt.xlabel("Index", fontsize=10)  # Reduce font size for low detail
+        plt.ylabel("Values", fontsize=10)  # Reduce font size for low detail
+        plt.legend(loc="best", fontsize=8)  # Reduce legend font size for low detail
+        plt.tight_layout(pad=3.0)
+        lineplot_file = os.path.join(output_folder, "lineplot.png")
+        plt.savefig(lineplot_file, dpi=100)  # Save as 960x540 pixels at 100 dpi
+        charts.append(lineplot_file)
+        plt.close()
+
+    # Histogram of the Second Column with low detail
+    if len(df.columns) > 1:  # Check if the dataset has at least two columns
+        second_column = df.columns[1]
+        if df[second_column].dtype in ["int64", "float64"]:  # Check if second column is numeric
+            plt.figure(figsize=(9.6, 5.4))  # Set the figsize to 960x540 pixels (9.6 inches at 100 dpi)
+            df[second_column].dropna().plot(kind="hist", bins=20, color="skyblue", edgecolor="black")  # Reduce bins for low detail
+            plt.title(f"Histogram of {second_column}", fontsize=12, pad=20)  # Reduce font size for low detail
+            plt.xlabel(second_column, fontsize=10)  # Reduce font size for low detail
+            plt.ylabel("Frequency", fontsize=10)  # Reduce font size for low detail
+            plt.tight_layout(pad=3.0)
+            histogram_file = os.path.join(output_folder, "histogram.png")
+            plt.savefig(histogram_file, dpi=100)  # Save as 960x540 pixels at 100 dpi
+            charts.append(histogram_file)
+            plt.close()
 
     return charts
 

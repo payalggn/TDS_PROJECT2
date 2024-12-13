@@ -1,30 +1,21 @@
-# ///
-# requires-python = ">=3.11"
-# dependencies = [
-#   "pandas",
-#   "seaborn",
-#   "matplotlib",
-#   "scipy",
-#   "tabulate",
-#   "requests",
-# ]
-# ///
-
 import os
 import sys
 import logging
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
-from scipy.stats import chi2_contingency
+from scipy.stats import zscore, chi2_contingency
+import numpy as np
 import requests
 
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 
-AIPROXY_TOKEN = os.getenv("AIPROXY_TOKEN", "")  # Get token from environment variable
+# Get API token from environment variable
+AIPROXY_TOKEN = os.getenv("AIPROXY_TOKEN", "")  
 
 def read_csv(filename):
     """Load CSV file with fallback encoding."""
@@ -39,113 +30,125 @@ def read_csv(filename):
         logging.error(f"Error loading {filename}: {e}")
         sys.exit(1)
 
-def prepare_prompt(df):
-    """Prepare dynamic prompt based on the dataset."""
-    df_info = {
-        "shape": df.shape,
-        "columns": list(df.columns),
-        "numeric_columns": df.select_dtypes(include=["number"]).columns.tolist(),
-        "categorical_columns": df.select_dtypes(exclude=["number"]).columns.tolist(),
-    }
-
-    prompt = f"""
-    You are a data analysis assistant. Here is the dataset:
-    
-    - Shape: {df_info['shape']}
-    - Columns: {', '.join(df_info['columns'])}
-    - Numeric Columns: {', '.join(df_info['numeric_columns'])}
-    - Categorical Columns: {', '.join(df_info['categorical_columns'])}
-
-    Please analyze the dataset, identify trends, and offer insights on:
-    1. General observations about the data.
-    2. Statistical relationships between variables.
-    3. Missing or unusual values.
-    4. Any potential issues or suggestions for further analysis.
-    """
-    
-    return prompt
-
-def send_api_request(prompt):
-    """Send a request to the AI Proxy API."""
-    if not AIPROXY_TOKEN:
-        logging.error("API token is not set in environment variables.")
-        return "Error: API token is missing."
-
-    api_url = "https://aiproxy.sanand.workers.dev/openai/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {AIPROXY_TOKEN}",
-        "Content-Type": "application/json",
-    }
-
-    data = {
-        "model": "gpt-4o-mini",
-        "messages": [
-            {"role": "system", "content": "You are a helpful data analysis assistant."},
-            {"role": "user", "content": prompt},
-        ],
-        "max_tokens": 1000,
-        "temperature": 0.7,
-    }
-
-    try:
-        response = requests.post(api_url, json=data, headers=headers)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            logging.error(f"API request failed: {response.status_code} - {response.text}")
-            return None
-    except Exception as e:
-        logging.error(f"An error occurred while making the API request: {e}")
-        return None
-
-def process_api_response(response_data):
-    """Process the response from the API and return the analysis."""
-    if "choices" in response_data:
-        analysis = response_data["choices"][0]["message"]["content"].strip()
-        return analysis
-    else:
-        logging.error(f"Unexpected response format: {response_data}")
-        return "Error: No analysis available in the response."
-
 def analyze_data(df):
-    """Analyze data using the AI Proxy and apply statistical methods."""
-    if not AIPROXY_TOKEN:
-        logging.error("API token is not set in environment variables.")
-        return "Error: API token is missing."
+    """Perform both traditional EDA and use AI Proxy for additional insights."""
+    # Step 1: Traditional EDA
 
-    # Basic Descriptive Statistics
-    description = df.describe(include='all')
+    # Data Overview
+    data_overview = {
+        "shape": df.shape,
+        "data_types": df.dtypes.to_dict(),
+        "summary_statistics": df.describe(include='all').to_dict(),
+    }
 
-    # Correlation Analysis (for numeric columns)
+    # Missing Data Analysis
+    missing_data = df.isnull().sum()
+    missing_percentage = (missing_data / len(df)) * 100
+    missing_overview = missing_data[missing_data > 0]
+
+    # Univariate Analysis (Visualize distributions of numerical features)
     numeric_columns = df.select_dtypes(include=["number"]).columns
+    categorical_columns = df.select_dtypes(include=["object"]).columns
+
+    # Visualize numeric distributions
+    for col in numeric_columns:
+        plt.figure(figsize=(10, 6))
+        sns.histplot(df[col].dropna(), kde=True)
+        plt.title(f"Distribution of {col}")
+        plt.xlabel(col)
+        plt.ylabel("Frequency")
+        plt.tight_layout()
+        plt.savefig(f"{col}_distribution.png")
+        plt.close()
+
+    # Visualize categorical distributions
+    for col in categorical_columns:
+        plt.figure(figsize=(10, 6))
+        sns.countplot(data=df, x=col)
+        plt.title(f"Distribution of {col}")
+        plt.xlabel(col)
+        plt.ylabel("Count")
+        plt.tight_layout()
+        plt.savefig(f"{col}_countplot.png")
+        plt.close()
+
+    # Bivariate Analysis (Correlations for numeric and chi-square for categorical)
     correlation_matrix = df[numeric_columns].corr()
+    plt.figure(figsize=(12, 8))
+    sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm')
+    plt.title("Correlation Matrix")
+    plt.tight_layout()
+    plt.savefig("correlation_heatmap.png")
+    plt.close()
 
     # Chi-Square Test for Categorical Variables
-    categorical_columns = df.select_dtypes(include=["object"]).columns
     chi_square_results = {}
     for col1 in categorical_columns:
         for col2 in categorical_columns:
             if col1 != col2:
-                # Creating a contingency table for chi-square test
                 contingency_table = pd.crosstab(df[col1], df[col2])
                 chi2, p, _, _ = chi2_contingency(contingency_table)
                 chi_square_results[(col1, col2)] = (chi2, p)
 
-    # Summarize the results
+    # Outlier Detection (Z-Score method)
+    outliers = {}
+    for col in numeric_columns:
+        z_scores = zscore(df[col].dropna())
+        outlier_indices = np.where(np.abs(z_scores) > 3)[0]  # Z-score > 3 indicates outliers
+        if len(outlier_indices) > 0:
+            outliers[col] = outlier_indices.tolist()
+
+    # Step 2: AI Proxy Analysis (summarizing findings)
+    ai_analysis = ""
+    if AIPROXY_TOKEN:
+        ai_analysis = analyze_using_api(df)
+
+    # Combine results
     analysis_summary = f"""
-    ### Descriptive Statistics:
-    {description.to_string()}
+    ### Data Overview:
+    - Shape: {data_overview['shape']}
+    - Data Types: {data_overview['data_types']}
+    
+    ### Summary Statistics:
+    {data_overview['summary_statistics']}
 
-    ### Correlation Analysis:
-    {correlation_matrix.to_string()}
+    ### Missing Data:
+    {missing_overview}
 
-    ### Chi-Square Test Results:
+    ### Bivariate Analysis:
+    - Correlation Matrix saved as 'correlation_heatmap.png'
     """
     for (col1, col2), (chi2, p) in chi_square_results.items():
         analysis_summary += f"\n{col1} vs {col2}: Chi2 = {chi2:.2f}, p-value = {p:.4f}"
 
-    # Send API request for advanced analysis
-    df_string = df.head(10).to_string()  # Use top 10 rows for AI model analysis
+    # Outlier Detection:
+    if outliers:
+        analysis_summary += "\nOutliers detected in the following columns (Z-Score > 3):"
+        for col, indices in outliers.items():
+            analysis_summary += f"\n{col}: {indices}"
+
+    # Add AI analysis at the end
+    if ai_analysis:
+        analysis_summary += f"\n\n### AI Insights:\n{ai_analysis}"
+
+    return analysis_summary
+
+def analyze_using_api(df):
+    """Send curated data to AI Proxy for additional insights."""
+    if not AIPROXY_TOKEN:
+        logging.error("API token is not set in environment variables.")
+        return "Error: API token is missing."
+
+    # Data curation: Select only relevant columns and a sample of rows
+    df_cleaned = df.select_dtypes(include=["number", "object"]).dropna(how="all")
+    
+    # Sample first 5 rows of the cleaned dataframe
+    df_sample = df_cleaned.head(5)
+
+    # Only send columns with significant data
+    df_string = df_sample.to_string()
+
+    # Create the prompt dynamically based on the cleaned data
     prompt = f"""
     You are a data analysis assistant. Given the following dataset:
 
@@ -157,6 +160,7 @@ def analyze_data(df):
     3. Analyze relationships between any categorical variables.
     4. Provide any recommendations or insights based on the data.
     """
+
     data = {
         "model": "gpt-4o-mini",
         "messages": [
@@ -167,71 +171,52 @@ def analyze_data(df):
         "temperature": 0.7,
     }
 
-    try:
-        response = send_api_request(data)
-        if response:
-            analysis_summary += f"\n\nAPI Analysis:\n{response}"
-        else:
-            logging.warning("API response missing or failed.")
-    except Exception as e:
-        logging.error(f"Error with API request: {str(e)}")
+    # Send the request to AI Proxy
+    response = send_api_request(data)
 
-    return analysis_summary
+    return response
+
+def send_api_request(data):
+    """Helper function to send the API request and handle responses."""
+    api_url = "https://aiproxy.sanand.workers.dev/openai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {AIPROXY_TOKEN}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        response = requests.post(api_url, json=data, headers=headers)
+
+        if response.status_code == 200:
+            response_data = response.json()
+            if "choices" in response_data:
+                return response_data["choices"][0]["message"]["content"].strip()
+            else:
+                logging.error(f"Unexpected response format: {response_data}")
+                return "Error: No analysis available in the response."
+        else:
+            logging.error(f"API request failed: {response.status_code} - {response.text}")
+            return f"Error: API request failed with status {response.status_code}"
+
+    except Exception as e:
+        logging.error(f"An error occurred while making the API request: {e}")
+        return f"Error: {str(e)}"
 
 def visualize_data(df):
-    """Generate visualizations for the dataset and save to the current working directory."""
+    """Generate visualizations for the dataset."""
     charts = []
-
-    # Identify numeric columns
     numeric_columns = df.select_dtypes(include=["number"]).columns
 
-    # Correlation Heatmap with low detail
-    if len(numeric_columns) > 1:  # Correlation requires at least two numeric columns
-        plt.figure(figsize=(9.6, 5.4))  # Set the figsize to 960x540 pixels (9.6 inches at 100 dpi)
-        heatmap = sns.heatmap(
-            df[numeric_columns].corr(),
-            annot=True,
-            cmap="coolwarm",
-            fmt=".2f",
-            cbar_kws={'shrink': 0.8},
-            annot_kws={"size": 8},  # Reduce annotation size for low detail
-        )
-        heatmap.set_title("Correlation Heatmap", fontsize=12, pad=20)  # Reduce font size for low detail
-        plt.tight_layout(pad=3.0)
-        heatmap_file = "heatmap.png"  # Save in the current directory
-        plt.savefig(heatmap_file, dpi=100)  # Save as 960x540 pixels at 100 dpi
-        charts.append(heatmap_file)
+    for col in numeric_columns:
+        plt.figure(figsize=(10, 6))
+        sns.histplot(df[col].dropna(), kde=True)
+        plt.title(f"Distribution of {col}")
+        plt.xlabel(col)
+        plt.ylabel("Frequency")
+        plt.tight_layout()
+        plt.savefig(f"{col}_distribution.png")
+        charts.append(f"{col}_distribution.png")
         plt.close()
-
-    # Line Plot of Numeric Columns with low detail
-    if len(numeric_columns) >= 2:
-        plt.figure(figsize=(9.6, 5.4))  # Set the figsize to 960x540 pixels (9.6 inches at 100 dpi)
-        for col in numeric_columns:
-            df[col].dropna().reset_index(drop=True).plot(label=col, linewidth=1)  # Reduce line width for low detail
-        plt.title("Line Plot of Numeric Columns", fontsize=12, pad=20)  # Reduce font size for low detail
-        plt.xlabel("Index", fontsize=10)  # Reduce font size for low detail
-        plt.ylabel("Values", fontsize=10)  # Reduce font size for low detail
-        plt.legend(loc="best", fontsize=8)  # Reduce legend font size for low detail
-        plt.tight_layout(pad=3.0)
-        lineplot_file = "lineplot.png"  # Save in the current directory
-        plt.savefig(lineplot_file, dpi=100)  # Save as 960x540 pixels at 100 dpi
-        charts.append(lineplot_file)
-        plt.close()
-
-    # Histogram of the Second Column with low detail
-    if len(df.columns) > 1:  # Check if the dataset has at least two columns
-        second_column = df.columns[1]
-        if df[second_column].dtype in ["int64", "float64"]:  # Check if second column is numeric
-            plt.figure(figsize=(9.6, 5.4))  # Set the figsize to 960x540 pixels (9.6 inches at 100 dpi)
-            df[second_column].dropna().plot(kind="hist", bins=20, color="skyblue", edgecolor="black")  # Reduce bins for low detail
-            plt.title(f"Histogram of {second_column}", fontsize=12, pad=20)  # Reduce font size for low detail
-            plt.xlabel(second_column, fontsize=10)  # Reduce font size for low detail
-            plt.ylabel("Frequency", fontsize=10)  # Reduce font size for low detail
-            plt.tight_layout(pad=3.0)
-            histogram_file = "histogram.png"  # Save in the current directory
-            plt.savefig(histogram_file, dpi=100)  # Save as 960x540 pixels at 100 dpi
-            charts.append(histogram_file)
-            plt.close()
 
     return charts
 
@@ -271,7 +256,7 @@ def save_markdown(df, analysis, charts):
     for chart in charts:
         readme_content += f"![Chart](./{chart})\n"
 
-    readme_file = "README.md"  # Save in the current directory
+    readme_file = "README.md"
     with open(readme_file, "w") as f:
         f.write(readme_content)
 

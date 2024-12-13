@@ -1,3 +1,14 @@
+# ///
+# requires-python = ">=3.11"
+# dependencies = [
+#   "pandas",
+#   "seaborn",
+#   "matplotlib",
+#   "scipy",
+#   "tabulate",
+# ]
+# ///
+
 import os
 import sys
 import logging

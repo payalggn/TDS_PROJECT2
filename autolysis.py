@@ -183,16 +183,19 @@ def visualize_data(df, output_prefix):
     # Histogram
     if len(df.columns) > 1:
         second_column = df.columns[1]
-        plt.figure(figsize=(14, 8))  # Reduced size for 512x512 px
-        df[second_column].dropna().plot(kind="hist", bins=30, color="skyblue", edgecolor="black")
-        plt.title(f"Histogram of {second_column}", fontsize=12, pad=10)
-        plt.xlabel(second_column, fontsize=10)
-        plt.ylabel("Frequency", fontsize=10)
-        plt.tight_layout(pad=2.0)
-        histogram_file = "histogram.png"  # Updated file name
-        plt.savefig(histogram_file, dpi=75)  # Reduced DPI for 512x512 px resolution
-        charts.append(histogram_file)
-        plt.close()
+        if pd.api.types.is_numeric_dtype(df[second_column]):  # Check if column is numeric
+            plt.figure(figsize=(14, 8))
+            df[second_column].dropna().plot(kind="hist", bins=30, color="skyblue", edgecolor="black")
+            plt.title(f"Histogram of {second_column}", fontsize=12, pad=10)
+            plt.xlabel(second_column, fontsize=10)
+            plt.ylabel("Frequency", fontsize=10)
+            plt.tight_layout(pad=2.0)
+            histogram_file = "histogram.png"
+            plt.savefig(histogram_file, dpi=75)
+            charts.append(histogram_file)
+            plt.close()
+        else:
+            logging.warning(f"Column '{second_column}' is not numeric, skipping histogram plot.")
 
     return charts
 
@@ -314,13 +317,16 @@ def main():
     response_data = send_api_request(prompt)
     if response_data:
         analysis = process_api_response(response_data)
-        logging.info(f"API Analysis: {analysis}")
 
     # Continue with local analysis and visualization
     analysis_summary, chi_square_results = analyze_data(df)
     output_prefix = os.path.splitext(os.path.basename(file_path))[0]
     charts = visualize_data(df, output_prefix)
-    save_markdown(df, analysis_summary, charts, f"{output_prefix}_report.md")
+    save_markdown(df, analysis_summary, charts, "readme.md")
+    
+    # Log relevant information
+    logging.info(f"Dataset loaded: {file_path}")
+    logging.info("Readme.md generated successfully.")
     logging.info("Analysis completed successfully.")
 
 if __name__ == "__main__":

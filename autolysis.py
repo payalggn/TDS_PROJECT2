@@ -40,7 +40,6 @@ def read_csv(filename):
         logging.error(f"Error loading {filename}: {e}")
         sys.exit(1)
 
-
 def prepare_prompt(df):
     """Prepare dynamic prompt based on the dataset."""
     df_info = {
@@ -48,24 +47,25 @@ def prepare_prompt(df):
         "columns": list(df.columns),
         "numeric_columns": df.select_dtypes(include=["number"]).columns.tolist(),
         "categorical_columns": df.select_dtypes(exclude=["number"]).columns.tolist(),
+        "missing_values": df.isnull().sum().to_dict(),
     }
 
     prompt = f"""
     You are a data analysis assistant. Here is the dataset:
-    
+
     - Shape: {df_info['shape']}
     - Columns: {', '.join(df_info['columns'])}
     - Numeric Columns: {', '.join(df_info['numeric_columns'])}
     - Categorical Columns: {', '.join(df_info['categorical_columns'])}
+    - Missing Values: {', '.join([f"{col}: {missing}" for col, missing in df_info['missing_values'].items()])}
 
-    Please analyze the dataset, identify trends, and offer insights on:
+    Please analyze the dataset and provide insights on:
     1. General observations about the data.
     2. Statistical relationships between variables.
     3. Missing or unusual values.
     4. Any potential issues or suggestions for further analysis.
     """
     return prompt
-
 
 def send_api_request(prompt):
     """Send a request to the AI Proxy API."""
@@ -306,12 +306,22 @@ def main():
 
     file_path = sys.argv[1]
     df = read_csv(file_path)
-    analysis, chi_square_results = analyze_data(df)
+    
+    # Prepare the prompt with summarized dataset info
+    prompt = prepare_prompt(df)
+
+    # Send the prompt to the API for analysis
+    response_data = send_api_request(prompt)
+    if response_data:
+        analysis = process_api_response(response_data)
+        logging.info(f"API Analysis: {analysis}")
+
+    # Continue with local analysis and visualization
+    analysis_summary, chi_square_results = analyze_data(df)
     output_prefix = os.path.splitext(os.path.basename(file_path))[0]
     charts = visualize_data(df, output_prefix)
-    save_markdown(df, analysis, charts, f"{output_prefix}_report.md")
+    save_markdown(df, analysis_summary, charts, f"{output_prefix}_report.md")
     logging.info("Analysis completed successfully.")
-
 
 if __name__ == "__main__":
     main()
